@@ -8,6 +8,7 @@ geopandas
 shapely
 pyproj
 leafmap
+localtileserver
 matplotlib
 segmentation-models-pytorch
 scipy
