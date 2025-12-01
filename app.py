@@ -10,8 +10,6 @@ from rasterio.features import shapes
 import geopandas as gpd
 from shapely.geometry import shape as shape_geom
 import segmentation_models_pytorch as smp
-import ee
-import geemap
 import json
 
 
