@@ -1,0 +1,10 @@
+streamlit
+torch
+rasterio
+geopandas
+shapely
+leafmap
+numpy
+segmentation-models-pytorch
+scipy
+scikit-image
