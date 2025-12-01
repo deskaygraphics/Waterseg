@@ -9,6 +9,7 @@ shapely
 pyproj
 leafmap
 localtileserver
+psutil
 matplotlib
 segmentation-models-pytorch
 scipy
