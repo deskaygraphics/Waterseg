@@ -1000,7 +1000,7 @@ def main():
                 st.warning(f"Could not display AOI map: {e}")
 
             st.subheader("Water mask preview (AOI)")
-            st.image(mask * 255, caption="Binary water mask (AOI)", width="stretch")
+            st.image(mask * 255, caption="Binary water mask (AOI)", use_container_width=True)
 
             if gdf is not None and len(gdf) > 0:
                 st.write(f"Detected {len(gdf)} water polygons.")
@@ -1011,7 +1011,7 @@ def main():
                     # Display table with selected columns
                     display_df = gdf[["id", "area_km2", "area_m2", "perimeter_m"]].copy()
                     display_df.columns = ["ID", "Area (km²)", "Area (m²)", "Perimeter (m)"]
-                    st.dataframe(display_df, width="stretch", hide_index=True)
+                    st.dataframe(display_df, use_container_width=True, hide_index=True)
                     
                     # Summary statistics
                     col1, col2, col3, col4 = st.columns(4)
@@ -1048,7 +1048,7 @@ def main():
             # Shapefile (zipped)
             col1, col2 = st.columns(2)
             with col1:
-                if st.button("Export as Shapefile (ZIP)", width="stretch"):
+                if st.button("Export as Shapefile (ZIP)", use_container_width=True):
                     if gdf is not None and len(gdf) > 0:
                         with st.spinner("Creating shapefile..."):
                             # Convert to WGS84 for proper export
@@ -1067,14 +1067,14 @@ def main():
                             data=shp_bytes,
                             file_name="water_mask_aoi_shapefile.zip",
                             mime="application/zip",
-                            width="stretch",
+                            use_container_width=True,
                         )
                     else:
                         st.warning("No water bodies detected to export.")
 
             # KML export
             with col2:
-                if st.button("Export as KML", width="stretch"):
+                if st.button("Export as KML", use_container_width=True):
                     if gdf is not None and len(gdf) > 0:
                         with st.spinner("Creating KML..."):
                             # Convert to WGS84 for KML (required by KML spec)
@@ -1094,7 +1094,7 @@ def main():
                             data=kml_bytes,
                             file_name="water_mask_aoi.kml",
                             mime="application/vnd.google-earth.kml+xml",
-                            width="stretch",
+                            use_container_width=True,
                         )
                     else:
                         st.warning("No water bodies detected to export.")
@@ -1157,7 +1157,7 @@ def main():
                     p2, p98 = np.percentile(valid, (2, 98))
                     rgb[:, :, i] = np.clip((band - p2) / (p98 - p2) * 255, 0, 255)
             
-            st.image(rgb.astype(np.uint8), caption="RGB Preview (bands shown may vary by sensor)", width="stretch")
+            st.image(rgb.astype(np.uint8), caption="RGB Preview (bands shown may vary by sensor)", use_container_width=True)
         except Exception as e:
             st.warning(f"Could not create RGB preview: {e}")
     else:
@@ -1168,7 +1168,7 @@ def main():
             if len(valid) > 0:
                 p2, p98 = np.percentile(valid, (2, 98))
                 band_norm = np.clip((band - p2) / (p98 - p2) * 255, 0, 255)
-                st.image(band_norm.astype(np.uint8), caption="Grayscale Preview", width="stretch")
+                st.image(band_norm.astype(np.uint8), caption="Grayscale Preview", use_container_width=True)
         except Exception as e:
             st.warning(f"Could not create preview: {e}")
 
@@ -1270,7 +1270,7 @@ def main():
             st.warning(f"Could not display interactive map: {e}")
 
         st.subheader("Water mask preview")
-        st.image(mask * 255, caption="Binary water mask", width="stretch")
+        st.image(mask * 255, caption="Binary water mask", use_container_width=True)
 
         if gdf is not None and len(gdf) > 0:
             st.write(f"Detected {len(gdf)} water polygons.")
@@ -1281,7 +1281,7 @@ def main():
                 # Display table with selected columns
                 display_df = gdf[["id", "area_km2", "area_m2", "perimeter_m"]].copy()
                 display_df.columns = ["ID", "Area (km²)", "Area (m²)", "Perimeter (m)"]
-                st.dataframe(display_df, width="stretch", hide_index=True)
+                st.dataframe(display_df, use_container_width=True, hide_index=True)
                 
                 # Summary statistics
                 col1, col2, col3, col4 = st.columns(4)
@@ -1318,7 +1318,7 @@ def main():
         # Shapefile (zipped) using existing utility
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("Export as Shapefile (ZIP)", width="stretch"):
+            if st.button("Export as Shapefile (ZIP)", use_container_width=True):
                 if gdf is not None and len(gdf) > 0:
                     with st.spinner("Creating shapefile..."):
                         # Convert to WGS84 for proper export
@@ -1334,14 +1334,14 @@ def main():
                         data=shp_bytes,
                         file_name="water_mask_shapefile.zip",
                         mime="application/zip",
-                        width="stretch",
+                        use_container_width=True,
                     )
                 else:
                     st.warning("No water bodies detected to export.")
 
         # KML export
         with col2:
-            if st.button("Export as KML", width="stretch"):
+            if st.button("Export as KML", use_container_width=True):
                 if gdf is not None and len(gdf) > 0:
                     with st.spinner("Creating KML..."):
                         # Convert to WGS84 for KML (required by KML spec)
@@ -1359,7 +1359,7 @@ def main():
                         data=kml_bytes,
                         file_name="water_mask.kml",
                         mime="application/vnd.google-earth.kml+xml",
-                        width="stretch",
+                        use_container_width=True,
                     )
                 else:
                     st.warning("No water bodies detected to export.")
