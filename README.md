@@ -135,7 +135,7 @@ pip install -r requirements.txt --upgrade
 - Using a machine with more RAM
 
 ### Issue: No satellite data found (AOI mode)
-**Solution**: 
+**Solution**:
 - Try a different time period (increase months back)
 - Select a different area
 - Check your internet connection

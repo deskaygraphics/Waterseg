@@ -19,6 +19,7 @@ import json
 # MODEL LOADING
 # -----------------------------
 
+
 def build_model():
     """Construct the segmentation model architecture.
 
@@ -64,10 +65,11 @@ def load_model(model_path, device="cpu"):
 # GOOGLE EARTH ENGINE HELPERS (AOI MODE)
 # -----------------------------
 
+
 def init_ee():
     """Initialize the Earth Engine client or raise a clear error."""
     import socket
-    
+
     # Quick network check
     def check_network():
         try:
@@ -75,24 +77,24 @@ def init_ee():
             return True
         except OSError:
             return False
-    
+
     if not check_network():
         raise RuntimeError(
             "No internet connection detected. Google Earth Engine requires internet access. "
             "Please check your network connection and try again."
         )
-    
+
     # Get project ID from Streamlit secrets or environment variable or use default
     project_id = None
     try:
-        if hasattr(st, 'secrets') and 'gee_project_id' in st.secrets:
-            project_id = st.secrets['gee_project_id']
+        if hasattr(st, "secrets") and "gee_project_id" in st.secrets:
+            project_id = st.secrets["gee_project_id"]
     except Exception:
         pass  # Secrets file doesn't exist, that's okay
-    
+
     if not project_id:
-        project_id = os.getenv('GEE_PROJECT_ID', 'ee-desmondkangah98')
-    
+        project_id = os.getenv("GEE_PROJECT_ID", "ee-desmondkangah98")
+
     try:
         # Try to initialize with existing credentials first
         ee.Initialize(project=project_id)
@@ -101,25 +103,26 @@ def init_ee():
         try:
             has_secrets = False
             try:
-                has_secrets = hasattr(st, 'secrets') and 'gee_service_account' in st.secrets
+                has_secrets = (
+                    hasattr(st, "secrets") and "gee_service_account" in st.secrets
+                )
             except Exception:
                 pass  # Secrets file doesn't exist
-            
+
             # Check for Streamlit secrets first (best for deployment)
             if has_secrets:
-                service_account_info = dict(st.secrets['gee_service_account'])
+                service_account_info = dict(st.secrets["gee_service_account"])
                 credentials = ee.ServiceAccountCredentials(
-                    email=service_account_info.get('client_email'),
-                    key_data=json.dumps(service_account_info)
+                    email=service_account_info.get("client_email"),
+                    key_data=json.dumps(service_account_info),
                 )
                 ee.Initialize(credentials, project=project_id)
             # Fall back to environment variable
-            elif os.getenv('GEE_SERVICE_ACCOUNT_FILE'):
-                service_account_file = os.getenv('GEE_SERVICE_ACCOUNT_FILE')
+            elif os.getenv("GEE_SERVICE_ACCOUNT_FILE"):
+                service_account_file = os.getenv("GEE_SERVICE_ACCOUNT_FILE")
                 if os.path.exists(service_account_file):
                     credentials = ee.ServiceAccountCredentials(
-                        email=None,
-                        key_file=service_account_file
+                        email=None, key_file=service_account_file
                     )
                     ee.Initialize(credentials, project=project_id)
             else:
@@ -138,33 +141,35 @@ def init_ee():
 
 def mask_s2_clouds(image):
     """Mask clouds in Sentinel-2 imagery using QA60 band."""
-    qa = image.select('QA60')
+    qa = image.select("QA60")
     # Bits 10 and 11 are clouds and cirrus
     cloud_bit_mask = 1 << 10
     cirrus_bit_mask = 1 << 11
     # Both flags should be set to zero, indicating clear conditions
-    mask = qa.bitwiseAnd(cloud_bit_mask).eq(0).And(
-        qa.bitwiseAnd(cirrus_bit_mask).eq(0)
-    )
+    mask = qa.bitwiseAnd(cloud_bit_mask).eq(0).And(qa.bitwiseAnd(cirrus_bit_mask).eq(0))
     return image.updateMask(mask)
 
 
 def mask_landsat_clouds(image):
     """Mask clouds in Landsat 8/9 imagery using QA_PIXEL band."""
-    qa = image.select('QA_PIXEL')
+    qa = image.select("QA_PIXEL")
     # Bit 3: cloud shadow, Bit 4: snow, Bit 5: cloud
     cloud_shadow_bit_mask = 1 << 3
     cloud_bit_mask = 1 << 5
     # Both flags should be set to zero, indicating clear conditions
-    mask = qa.bitwiseAnd(cloud_shadow_bit_mask).eq(0).And(
-        qa.bitwiseAnd(cloud_bit_mask).eq(0)
+    mask = (
+        qa.bitwiseAnd(cloud_shadow_bit_mask)
+        .eq(0)
+        .And(qa.bitwiseAnd(cloud_bit_mask).eq(0))
     )
     return image.updateMask(mask)
 
 
-def build_planetary_computer_image_for_aoi(aoi_geojson, satellite_type: str, months_back: int = 6):
+def build_planetary_computer_image_for_aoi(
+    aoi_geojson, satellite_type: str, months_back: int = 6
+):
     """Build an image from Microsoft Planetary Computer over the AOI.
-    
+
     Uses STAC API to search and download Sentinel-2 or Landsat imagery.
     No authentication required!
     """
@@ -172,37 +177,38 @@ def build_planetary_computer_image_for_aoi(aoi_geojson, satellite_type: str, mon
     import planetary_computer
     import stackstac
     from datetime import datetime, timedelta
-    
+
     # Extract geometry
     if isinstance(aoi_geojson, dict) and "geometry" in aoi_geojson:
         geom_dict = aoi_geojson["geometry"]
     else:
         geom_dict = aoi_geojson
-    
+
     # Get bounding box from geometry
     coords = geom_dict["coordinates"][0]
     lons = [c[0] for c in coords]
     lats = [c[1] for c in coords]
     bbox_wgs84 = [min(lons), min(lats), max(lons), max(lats)]
-    
+
     # Transform bbox to Web Mercator for stackstac (fixes negative longitude issue)
     from pyproj import Transformer
+
     transformer = Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True)
     min_x, min_y = transformer.transform(bbox_wgs84[0], bbox_wgs84[1])
     max_x, max_y = transformer.transform(bbox_wgs84[2], bbox_wgs84[3])
     bbox_mercator = [min_x, min_y, max_x, max_y]
-    
+
     # Calculate date range
     end_date = datetime.now()
     start_date = end_date - timedelta(days=months_back * 30)
     date_range = f"{start_date.strftime('%Y-%m-%d')}/{end_date.strftime('%Y-%m-%d')}"
-    
+
     print(f"[Planetary Computer] Searching for {satellite_type} imagery...")
     print(f"  AOI bbox (WGS84 lon/lat): {bbox_wgs84}")
     print(f"  AOI bbox (Web Mercator): {bbox_mercator}")
     print(f"  AOI center: lon={sum(lons)/len(lons):.4f}, lat={sum(lats)/len(lats):.4f}")
     print(f"  Date range: {date_range}")
-    
+
     # Connect to Planetary Computer STAC catalog
     try:
         # Try with modifier (newer versions)
@@ -215,11 +221,18 @@ def build_planetary_computer_image_for_aoi(aoi_geojson, satellite_type: str, mon
         catalog = pystac_client.Client.open(
             "https://planetarycomputer.microsoft.com/api/stac/v1"
         )
-    
+
     # Determine collection and bands based on satellite type
     if "Sentinel-2" in satellite_type:
         collection = "sentinel-2-l2a"
-        bands = ["B02", "B03", "B04", "B08", "B11", "B12"]  # Blue, Green, Red, NIR, SWIR1, SWIR2
+        bands = [
+            "B02",
+            "B03",
+            "B04",
+            "B08",
+            "B11",
+            "B12",
+        ]  # Blue, Green, Red, NIR, SWIR1, SWIR2
         scale = 10
     elif "Landsat" in satellite_type:
         if "8" in satellite_type:
@@ -229,8 +242,10 @@ def build_planetary_computer_image_for_aoi(aoi_geojson, satellite_type: str, mon
         bands = ["coastal", "blue", "green", "red", "nir08", "swir16"]
         scale = 30
     else:
-        raise ValueError(f"Satellite type '{satellite_type}' not supported for Planetary Computer")
-    
+        raise ValueError(
+            f"Satellite type '{satellite_type}' not supported for Planetary Computer"
+        )
+
     # Search for imagery (use WGS84 bbox for search)
     search = catalog.search(
         collections=[collection],
@@ -238,7 +253,7 @@ def build_planetary_computer_image_for_aoi(aoi_geojson, satellite_type: str, mon
         datetime=date_range,
         query={"eo:cloud_cover": {"lt": 20}},  # Less than 20% cloud cover
     )
-    
+
     # Get items (compatible with older pystac-client versions)
     try:
         items = list(search.items())
@@ -248,21 +263,25 @@ def build_planetary_computer_image_for_aoi(aoi_geojson, satellite_type: str, mon
             items = list(search.get_items())
         except AttributeError:
             items = search.item_collection()
-    
+
     image_count = len(items)
-    
+
     print(f"[Planetary Computer] Found {image_count} images")
-    
+
     if image_count == 0:
         return None, None, scale, 0
-    
+
     # Sign items for access (required for Planetary Computer)
     items = [planetary_computer.sign(item) for item in items]
-    
+
     # Stack images using stackstac
-    print(f"[Planetary Computer] Loading and stacking {min(10, image_count)} least cloudy images...")
-    items_sorted = sorted(items, key=lambda x: x.properties.get("eo:cloud_cover", 100))[:10]
-    
+    print(
+        f"[Planetary Computer] Loading and stacking {min(10, image_count)} least cloudy images..."
+    )
+    items_sorted = sorted(items, key=lambda x: x.properties.get("eo:cloud_cover", 100))[
+        :10
+    ]
+
     # Stack images using stackstac with Web Mercator bounds (fixes negative longitude bug)
     stack = stackstac.stack(
         items_sorted,
@@ -271,29 +290,34 @@ def build_planetary_computer_image_for_aoi(aoi_geojson, satellite_type: str, mon
         epsg=3857,  # Explicitly set to Web Mercator
         resolution=scale,
     )
-    
+
     # Compute median composite
     print(f"[Planetary Computer] Computing median composite...")
     import dask
-    with dask.config.set(**{'array.slicing.split_large_chunks': True}):
+
+    with dask.config.set(**{"array.slicing.split_large_chunks": True}):
         composite = stack.median(dim="time").compute()
-    
+
     # Convert to numpy array (C, H, W) format
     image = composite.values
-    
+
     # Get geospatial metadata from xarray attributes
     import rasterio
     from rasterio.transform import Affine
     from rasterio.crs import CRS
-    
+
     # Debug: Print what stackstac actually returned
-    print(f"[Planetary Computer] Composite x range: [{composite.x.values[0]:.2f}, {composite.x.values[-1]:.2f}]")
-    print(f"[Planetary Computer] Composite y range: [{composite.y.values[0]:.2f}, {composite.y.values[-1]:.2f}]")
-    if hasattr(composite, 'crs'):
+    print(
+        f"[Planetary Computer] Composite x range: [{composite.x.values[0]:.2f}, {composite.x.values[-1]:.2f}]"
+    )
+    print(
+        f"[Planetary Computer] Composite y range: [{composite.y.values[0]:.2f}, {composite.y.values[-1]:.2f}]"
+    )
+    if hasattr(composite, "crs"):
         print(f"[Planetary Computer] Composite CRS attribute: {composite.crs}")
-    
+
     # Try to get transform from attributes
-    if hasattr(composite, 'transform'):
+    if hasattr(composite, "transform"):
         transform = composite.transform
         print(f"[Planetary Computer] Using transform from composite.transform")
     else:
@@ -304,51 +328,61 @@ def build_planetary_computer_image_for_aoi(aoi_geojson, satellite_type: str, mon
         y_res = float(y_coords[1] - y_coords[0]) if len(y_coords) > 1 else -scale
         transform = Affine(x_res, 0, float(x_coords[0]), 0, y_res, float(y_coords[0]))
         print(f"[Planetary Computer] Built transform from coordinates")
-    
+
     print(f"[Planetary Computer] Transform: {transform}")
-    
+
     # Get CRS
-    if hasattr(composite, 'crs'):
+    if hasattr(composite, "crs"):
         crs_str = str(composite.crs)
         print(f"[Planetary Computer] Using CRS from composite: {crs_str}")
     else:
         # Default to Web Mercator
-        crs_str = 'EPSG:3857'
+        crs_str = "EPSG:3857"
         print(f"[Planetary Computer] No CRS in composite, defaulting to: {crs_str}")
-    
+
     # Ensure no NaN values and convert to uint16 for consistency with training data
     image = np.nan_to_num(image, nan=0.0)
     image = np.clip(image, 0, 65535).astype(np.uint16)
-    
+
     profile = {
-        'driver': 'GTiff',
-        'height': image.shape[1],
-        'width': image.shape[2],
-        'count': image.shape[0],
-        'dtype': 'uint16',
-        'crs': crs_str,
-        'transform': transform,
+        "driver": "GTiff",
+        "height": image.shape[1],
+        "width": image.shape[2],
+        "count": image.shape[0],
+        "dtype": "uint16",
+        "crs": crs_str,
+        "transform": transform,
     }
-    
+
     # Calculate bounds as BoundingBox
     from rasterio.coords import BoundingBox
-    bounds_tuple = rasterio.transform.array_bounds(image.shape[1], image.shape[2], transform)
+
+    bounds_tuple = rasterio.transform.array_bounds(
+        image.shape[1], image.shape[2], transform
+    )
     bounds = BoundingBox(*bounds_tuple)
-    
-    print(f"[Planetary Computer] Downloaded image shape: {image.shape}, dtype: {image.dtype}")
+
+    print(
+        f"[Planetary Computer] Downloaded image shape: {image.shape}, dtype: {image.dtype}"
+    )
     print(f"[Planetary Computer] Value range: [{image.min()}, {image.max()}]")
     print(f"[Planetary Computer] CRS: {crs_str}")
     print(f"[Planetary Computer] Bounds (in {crs_str}): {bounds}")
-    
+
     # Convert bounds to WGS84 to verify location
-    if crs_str == 'EPSG:3857':
+    if crs_str == "EPSG:3857":
         from pyproj import Transformer
+
         transformer = Transformer.from_crs("EPSG:3857", "EPSG:4326", always_xy=True)
         min_lon, min_lat = transformer.transform(bounds.left, bounds.bottom)
         max_lon, max_lat = transformer.transform(bounds.right, bounds.top)
-        print(f"[Planetary Computer] Bounds in WGS84: lon=[{min_lon:.4f}, {max_lon:.4f}], lat=[{min_lat:.4f}, {max_lat:.4f}]")
-        print(f"[Planetary Computer] Expected around: lon=[-91.26, -91.01], lat=[31.93, 32.14]")
-    
+        print(
+            f"[Planetary Computer] Bounds in WGS84: lon=[{min_lon:.4f}, {max_lon:.4f}], lat=[{min_lat:.4f}, {max_lat:.4f}]"
+        )
+        print(
+            f"[Planetary Computer] Expected around: lon=[-91.26, -91.01], lat=[31.93, 32.14]"
+        )
+
     return image, profile, transform, crs_str, bounds, image_count
 
 
@@ -370,6 +404,7 @@ def build_gee_image_for_aoi(aoi_geojson, satellite_type: str, months_back: int =
 
     # Calculate date range - use recent data for faster processing
     from datetime import datetime, timedelta
+
     end_date = datetime.now()
     start_date = end_date - timedelta(days=months_back * 30)
     start_str = start_date.strftime("%Y-%m-%d")
@@ -384,7 +419,9 @@ def build_gee_image_for_aoi(aoi_geojson, satellite_type: str, months_back: int =
             ee.ImageCollection(collection_id)
             .filterBounds(geom)
             .filterDate(start_str, end_str)
-            .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 20))  # Stricter cloud filter
+            .filter(
+                ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 20)
+            )  # Stricter cloud filter
             .map(mask_s2_clouds)  # Apply cloud masking
             .select(bands)
         )
@@ -394,7 +431,11 @@ def build_gee_image_for_aoi(aoi_geojson, satellite_type: str, months_back: int =
 
     elif "Landsat 8" in satellite_type or "Landsat 9" in satellite_type:
         # Landsat 8/9 surface reflectance collections
-        collection_id = "LANDSAT/LC08/C02/T1_L2" if "8" in satellite_type else "LANDSAT/LC09/C02/T1_L2"
+        collection_id = (
+            "LANDSAT/LC08/C02/T1_L2"
+            if "8" in satellite_type
+            else "LANDSAT/LC09/C02/T1_L2"
+        )
         # Example 6-band stack: coastal, blue, green, red, NIR, SWIR1
         bands = ["SR_B1", "SR_B2", "SR_B3", "SR_B4", "SR_B5", "SR_B6"]
         scale = 30
@@ -411,7 +452,9 @@ def build_gee_image_for_aoi(aoi_geojson, satellite_type: str, months_back: int =
         image_count = col.size().getInfo()
 
     else:
-        raise ValueError(f"Satellite type '{satellite_type}' is not yet supported for AOI mode.")
+        raise ValueError(
+            f"Satellite type '{satellite_type}' is not yet supported for AOI mode."
+        )
 
     return image, geom, scale, image_count
 
@@ -426,7 +469,7 @@ def export_gee_image_to_geotiff(ee_image, geom, scale, out_tif, max_pixels=2048)
 
     # Calculate appropriate scale to limit image size
     # Get the bounds to estimate size
-    bounds = geom.bounds().getInfo()['coordinates'][0]
+    bounds = geom.bounds().getInfo()["coordinates"][0]
     width_deg = abs(bounds[2][0] - bounds[0][0])
     height_deg = abs(bounds[2][1] - bounds[0][1])
 
@@ -443,29 +486,35 @@ def export_gee_image_to_geotiff(ee_image, geom, scale, out_tif, max_pixels=2048)
     if max_dim > max_pixels:
         scale = scale * (max_dim / max_pixels)
         scale = int(scale)
-    
-    print(f"[export_gee_image_to_geotiff] Downloading at scale={scale}m, estimated size: {int(width_px)}x{int(height_px)} pixels")
+
+    print(
+        f"[export_gee_image_to_geotiff] Downloading at scale={scale}m, estimated size: {int(width_px)}x{int(height_px)} pixels"
+    )
 
     # Get the download URL from Earth Engine with size limits
-    url = ee_image.getDownloadURL({
-        'scale': scale,
-        'region': geom,
-        'format': 'GEO_TIFF',
-        'maxPixels': 1e8  # 100 million pixel cap
-    })
+    url = ee_image.getDownloadURL(
+        {
+            "scale": scale,
+            "region": geom,
+            "format": "GEO_TIFF",
+            "maxPixels": 1e8,  # 100 million pixel cap
+        }
+    )
 
     # Download the image
     response = requests.get(url, stream=True, timeout=300)  # 5 min timeout
     response.raise_for_status()
 
     # Save to file
-    with open(out_tif, 'wb') as f:
+    with open(out_tif, "wb") as f:
         for chunk in response.iter_content(chunk_size=8192):
             f.write(chunk)
-    
+
     # Read and verify the downloaded image
     image, profile, transform, crs, bounds = read_geotiff(out_tif)
-    print(f"[export_gee_image_to_geotiff] Downloaded image shape: {image.shape}, dtype: {image.dtype}")
+    print(
+        f"[export_gee_image_to_geotiff] Downloaded image shape: {image.shape}, dtype: {image.dtype}"
+    )
     print(f"[export_gee_image_to_geotiff] Value range: [{image.min()}, {image.max()}]")
 
     return image, profile, transform, crs, bounds
@@ -476,7 +525,7 @@ def export_gee_image_to_geotiff(ee_image, geom, scale, out_tif, max_pixels=2048)
 # -----------------------------
 def read_geotiff(path):
     with rasterio.open(path) as src:
-        image = src.read()          # (C, H, W)
+        image = src.read()  # (C, H, W)
         profile = src.profile.copy()
         transform = src.transform
         crs = src.crs
@@ -512,31 +561,30 @@ def preprocess_tile(tile):
 
 def postprocess_mask(mask, min_area_pixels=100, kernel_size=3):
     """Post-process binary mask to remove noise and improve quality.
-    
+
     Args:
         mask: Binary mask (H, W) with values 0 or 1
         min_area_pixels: Minimum area in pixels for a water body to keep
         kernel_size: Size of morphological kernel (3, 5, 7, etc.)
-    
+
     Returns:
         Cleaned binary mask
     """
     from scipy import ndimage
     from skimage import morphology
-    
+
     # Morphological closing to fill small holes
     kernel = morphology.disk(kernel_size)
     mask_closed = morphology.binary_closing(mask, kernel)
-    
+
     # Remove small objects (noise)
     mask_cleaned = morphology.remove_small_objects(
-        mask_closed.astype(bool), 
-        min_size=min_area_pixels
+        mask_closed.astype(bool), min_size=min_area_pixels
     ).astype(np.uint8)
-    
+
     # Fill holes in remaining water bodies
     mask_filled = ndimage.binary_fill_holes(mask_cleaned).astype(np.uint8)
-    
+
     return mask_filled
 
 
@@ -586,10 +634,14 @@ def predict_large_image(
                 tile = preprocess_tile(tile)
 
                 # add batch dim
-                tile_tensor = torch.from_numpy(tile).unsqueeze(0).to(device)  # (1, C, h, w)
+                tile_tensor = (
+                    torch.from_numpy(tile).unsqueeze(0).to(device)
+                )  # (1, C, h, w)
 
                 # forward pass
-                out = model(tile_tensor)  # assume (1, 1, h, w) or (1, num_classes, h, w)
+                out = model(
+                    tile_tensor
+                )  # assume (1, 1, h, w) or (1, num_classes, h, w)
                 if out.shape[1] > 1:
                     # multi-class: take water class index 1 (adjust if different)
                     out = out[:, 1:2, :, :]
@@ -606,38 +658,56 @@ def predict_large_image(
     # crop back to original size
     prob_full = prob_full[:H, :W]
     mask_full = (prob_full >= 0.5).astype(np.uint8)
-    
+
     # Debug info
     water_pixels = np.sum(mask_full == 1)
     total_pixels = mask_full.size
-    print(f"[predict_large_image] Predicted water pixels: {water_pixels}/{total_pixels} ({100*water_pixels/total_pixels:.2f}%)")
-    print(f"[predict_large_image] Probability range: [{prob_full.min():.3f}, {prob_full.max():.3f}]")
+    print(
+        f"[predict_large_image] Predicted water pixels: {water_pixels}/{total_pixels} ({100*water_pixels/total_pixels:.2f}%)"
+    )
+    print(
+        f"[predict_large_image] Probability range: [{prob_full.min():.3f}, {prob_full.max():.3f}]"
+    )
 
     return mask_full, prob_full
+
+
 # -----------------------------
 # MASK → POLYGONS → SHAPEFILE
 # -----------------------------
+
 
 def mask_to_vector(mask, transform, crs):
     """
     Convert binary mask (H, W) into a GeoDataFrame of water polygons with statistics.
     """
     from rasterio.crs import CRS
-    
+
     mask = mask.astype(np.uint8)
-    
+
     # Ensure CRS is a CRS object, not a string
     if isinstance(crs, str):
         crs = CRS.from_string(crs)
-    
+
     # Debug info
     water_pixels = np.sum(mask == 1)
     total_pixels = mask.size
-    print(f"[mask_to_vector] Water pixels: {water_pixels}/{total_pixels} ({100*water_pixels/total_pixels:.2f}%)")
+    print(
+        f"[mask_to_vector] Water pixels: {water_pixels}/{total_pixels} ({100*water_pixels/total_pixels:.2f}%)"
+    )
 
     if water_pixels == 0:
         print("[mask_to_vector] No water detected in mask")
-        return gpd.GeoDataFrame({"id": [], "area_km2": [], "area_m2": [], "perimeter_m": [], "geometry": []}, crs=crs)
+        return gpd.GeoDataFrame(
+            {
+                "id": [],
+                "area_km2": [],
+                "area_m2": [],
+                "perimeter_m": [],
+                "geometry": [],
+            },
+            crs=crs,
+        )
 
     results = shapes(mask, mask=mask == 1, transform=transform)
 
@@ -647,17 +717,26 @@ def mask_to_vector(mask, transform, crs):
             geoms.append(shape_geom(geom))
 
     print(f"[mask_to_vector] Generated {len(geoms)} polygons")
-    
+
     if len(geoms) == 0:
         # return empty GDF with CRS
-        return gpd.GeoDataFrame({"id": [], "area_km2": [], "area_m2": [], "perimeter_m": [], "geometry": []}, crs=crs)
+        return gpd.GeoDataFrame(
+            {
+                "id": [],
+                "area_km2": [],
+                "area_m2": [],
+                "perimeter_m": [],
+                "geometry": [],
+            },
+            crs=crs,
+        )
 
     # Create a GeoDataFrame with one row per geometry
     gdf = gpd.GeoDataFrame({"geometry": geoms}, crs=crs)
-    
+
     # Add water body ID
     gdf["id"] = range(1, len(gdf) + 1)
-    
+
     # Calculate area and perimeter
     # Convert to projected CRS for accurate measurements
     if crs and crs.is_geographic:
@@ -667,21 +746,20 @@ def mask_to_vector(mask, transform, crs):
     else:
         gdf["area_m2"] = gdf.geometry.area
         gdf["perimeter_m"] = gdf.geometry.length
-    
+
     # Convert area to km²
     gdf["area_km2"] = gdf["area_m2"] / 1_000_000
-    
+
     # Round for display
     gdf["area_km2"] = gdf["area_km2"].round(4)
     gdf["area_m2"] = gdf["area_m2"].round(2)
     gdf["perimeter_m"] = gdf["perimeter_m"].round(2)
-    
+
     # Sort by area (largest first)
     gdf = gdf.sort_values("area_km2", ascending=False).reset_index(drop=True)
     gdf["id"] = range(1, len(gdf) + 1)
-    
-    return gdf
 
+    return gdf
 
 
 def export_shapefile_zip(gdf, out_dir, base_name="water_mask"):
@@ -720,20 +798,17 @@ def get_model(model_path: str, device: str = "cpu"):
 
 def main():
     st.title("🌊 Water Segmentation App")
-    
+
     # Welcome banner
     st.success(
-        "Model: U-Net ResNet-34 || " 
+        "Model: U-Net ResNet-34 || "
         "Upload your satellite imagery to detect water bodies"
     )
 
     st.sidebar.header("Model Settings")
-    model_path = st.sidebar.text_input(
-        "Model path", 
-        value="best_model.pth"
-    )
+    model_path = st.sidebar.text_input("Model path", value="best_model.pth")
     device = st.sidebar.selectbox("Device", ["cpu", "cuda"], index=0)
-    
+
     # Set default values
     st.session_state["max_pixels"] = 2048
     st.session_state["date_months"] = 6
@@ -744,13 +819,17 @@ def main():
     basemap_options = list(getattr(leafmap, "basemaps", {}).keys())
     basemap = None
     if basemap_options:
-        default_index = basemap_options.index("OpenStreetMap") if "OpenStreetMap" in basemap_options else 0
+        default_index = (
+            basemap_options.index("OpenStreetMap")
+            if "OpenStreetMap" in basemap_options
+            else 0
+        )
         basemap = st.sidebar.selectbox("Basemap", basemap_options, index=default_index)
 
     # AOI Mode Settings
     st.sidebar.subheader("AOI Mode Settings")
-    #st.sidebar.info("Using Microsoft Planetary Computer - No authentication required!")
-    
+    # st.sidebar.info("Using Microsoft Planetary Computer - No authentication required!")
+
     # Satellite source selection
     satellite_type = st.sidebar.selectbox(
         "Satellite Type",
@@ -760,14 +839,18 @@ def main():
     st.session_state["satellite_type"] = satellite_type
 
     st.header("1. Upload GeoTIFF (Recommended)")
-    uploaded_file = st.file_uploader("Upload a GeoTIFF satellite image", type=["tif", "tiff"])
+    uploaded_file = st.file_uploader(
+        "Upload a GeoTIFF satellite image", type=["tif", "tiff"]
+    )
 
     # If no image is uploaded, allow the user to select an area of interest (AOI) on a map
     if uploaded_file is None:
         if "aoi_in_progress" not in st.session_state:
             st.session_state["aoi_in_progress"] = False
 
-        st.info("**Recommended:** Upload a .tif/.tiff GeoTIFF file above, or try drawing an AOI below.")
+        st.info(
+            "**Recommended:** Upload a .tif/.tiff GeoTIFF file above, or try drawing an AOI below."
+        )
 
         st.subheader("🌍 Alternative: Select Area of Interest (AOI)")
         st.info(
@@ -777,7 +860,10 @@ def main():
         aoi_geojson = None
 
         # If a previous run was started but no results are available, warn the user
-        if st.session_state["aoi_in_progress"] and "water_mask_aoi" not in st.session_state:
+        if (
+            st.session_state["aoi_in_progress"]
+            and "water_mask_aoi" not in st.session_state
+        ):
             st.warning(
                 "An AOI detection was previously started and may still be running or was interrupted. "
                 "If no results appear after a few minutes, you can click 'Detect Water in AOI' again."
@@ -787,7 +873,9 @@ def main():
         try:
             # Initial map for AOI selection, with drawing tools enabled
             # draw_control=True adds the Leaflet draw toolbar; draw_export=True allows exporting drawn features
-            m_aoi = leafmap.Map(center=[0, 0], zoom=2, draw_control=True, draw_export=True)
+            m_aoi = leafmap.Map(
+                center=[0, 0], zoom=2, draw_control=True, draw_export=True
+            )
             if basemap:
                 m_aoi.add_basemap(basemap)
 
@@ -809,7 +897,9 @@ def main():
             elif "aoi_geojson" in st.session_state:
                 aoi_geojson = st.session_state["aoi_geojson"]
 
-            st.info("Draw a polygon/rectangle on the map, then click 'Detect Water in AOI'.")
+            st.info(
+                "Draw a polygon/rectangle on the map, then click 'Detect Water in AOI'."
+            )
         except Exception as e:
             st.warning(f"Could not display AOI selection map: {e}")
 
@@ -828,64 +918,80 @@ def main():
                         date_months = st.session_state.get("date_months", 6)
 
                         # Fetch imagery from Planetary Computer
-                        with st.spinner(f"🌐 Fetching {satellite_type} imagery from Microsoft Planetary Computer..."):
+                        with st.spinner(
+                            f"🌐 Fetching {satellite_type} imagery from Microsoft Planetary Computer..."
+                        ):
                             try:
                                 result = build_planetary_computer_image_for_aoi(
                                     aoi_geojson, satellite_type, months_back=date_months
                                 )
 
                                 if result[5] == 0:  # image_count
-                                    st.error(f"No cloud-free {satellite_type} images found for this area. Try a different area or date range.")
+                                    st.error(
+                                        f"No cloud-free {satellite_type} images found for this area. Try a different area or date range."
+                                    )
                                     return
 
-                                image, profile, transform, crs, bounds, image_count = result
-                                st.success(f"✓ Found and downloaded {image_count} images from Planetary Computer")
+                                image, profile, transform, crs, bounds, image_count = (
+                                    result
+                                )
+                                st.success(
+                                    f"✓ Found and downloaded {image_count} images from Planetary Computer"
+                                )
                                 progress_bar.progress(45)
 
                             except Exception as e:
                                 st.error(f"Error fetching from Planetary Computer: {e}")
-                                st.info("Try using Upload mode instead - upload a 6-band GeoTIFF above.")
+                                st.info(
+                                    "Try using Upload mode instead - upload a 6-band GeoTIFF above."
+                                )
                                 return
-                        
+
                         # Save image to temp file - keep in original CRS (like upload method)
-                        with tempfile.NamedTemporaryFile(suffix="_aoi.tif", delete=False) as tmp_aoi:
+                        with tempfile.NamedTemporaryFile(
+                            suffix="_aoi.tif", delete=False
+                        ) as tmp_aoi:
                             aoi_tiff_path = tmp_aoi.name
-                        
-                        with rasterio.open(aoi_tiff_path, 'w', **profile) as dst:
+
+                        with rasterio.open(aoi_tiff_path, "w", **profile) as dst:
                             dst.write(image)
-                        
+
                         # Run model inference
                         with st.spinner("🤖 Running water detection model..."):
                             model = get_model(model_path, device=device)
                             progress_bar.progress(60)
-                            mask, prob = predict_large_image(model, image, device=device)
+                            mask, prob = predict_large_image(
+                                model, image, device=device
+                            )
                             progress_bar.progress(70)
-                        
+
                         # Convert mask to polygons for visualization and export
                         with st.spinner("🗺️ Converting to vector polygons..."):
                             gdf = mask_to_vector(mask, transform, crs)
                             progress_bar.progress(80)
 
                         # Save mask GeoTIFF to temp file
-                        with tempfile.NamedTemporaryFile(suffix="_mask.tif", delete=False) as tmp_mask:
+                        with tempfile.NamedTemporaryFile(
+                            suffix="_mask.tif", delete=False
+                        ) as tmp_mask:
                             mask_tif_path = tmp_mask.name
                         save_mask_geotiff(mask, profile, mask_tif_path)
                         progress_bar.progress(90)
 
                         # Store AOI results in session state with polygons ready
                         st.session_state["water_mask_aoi"] = {
-                                "mask": mask,
-                                "profile": profile,
-                                "transform": transform,
-                                "crs": crs,
-                                "gdf": gdf,
-                                "mask_tif_path": mask_tif_path,
-                                "aoi_tiff_path": aoi_tiff_path,
-                                "bounds": bounds,
-                                "image": image,
-                                "satellite_type": satellite_type,
-                                "image_count": image_count,
-                            }
+                            "mask": mask,
+                            "profile": profile,
+                            "transform": transform,
+                            "crs": crs,
+                            "gdf": gdf,
+                            "mask_tif_path": mask_tif_path,
+                            "aoi_tiff_path": aoi_tiff_path,
+                            "bounds": bounds,
+                            "image": image,
+                            "satellite_type": satellite_type,
+                            "image_count": image_count,
+                        }
 
                         progress_bar.progress(100)
                         st.success("AOI detection complete.")
@@ -905,7 +1011,7 @@ def main():
             image = data.get("image")
             sat_type = data.get("satellite_type", "Unknown")
             img_count = data.get("image_count", "Unknown")
-            
+
             # Display image quality info
             with st.expander("Satellite Image Quality", expanded=False):
                 col1, col2 = st.columns(2)
@@ -913,7 +1019,9 @@ def main():
                     st.write(f"**Source:** {sat_type}")
                     st.write(f"**Images in composite:** {img_count}")
                     if image is not None:
-                        st.write(f"**Dimensions:** {image.shape[2]} x {image.shape[1]} pixels")
+                        st.write(
+                            f"**Dimensions:** {image.shape[2]} x {image.shape[1]} pixels"
+                        )
                         st.write(f"**Bands:** {image.shape[0]}")
                 with col2:
                     if image is not None:
@@ -922,41 +1030,52 @@ def main():
                         total_pixels = image.shape[1] * image.shape[2]
                         coverage = (valid_pixels / total_pixels) * 100
                         st.write(f"**Data coverage:** {coverage:.1f}%")
-                        
+
                         # Show band statistics
                         st.write("**Band value ranges:**")
                         for i in range(min(3, image.shape[0])):
                             band_data = image[i][image[i] > 0]
                             if len(band_data) > 0:
-                                st.write(f"  Band {i+1}: {band_data.min():.0f} - {band_data.max():.0f}")
-            
+                                st.write(
+                                    f"  Band {i+1}: {band_data.min():.0f} - {band_data.max():.0f}"
+                                )
+
             # Interactive map with satellite imagery and water outline
             st.subheader("🗺️ Interactive Map with Water Detection")
-            st.info("📍 Blue outlines show detected water bodies on the satellite image")
-            
+            st.info(
+                "📍 Blue outlines show detected water bodies on the satellite image"
+            )
+
             try:
                 # leafmap.Map expects center in WGS84 (lat, lon) regardless of raster CRS
                 # If bounds are in Web Mercator (values > 180), convert to WGS84
                 center_x = (bounds.left + bounds.right) / 2
                 center_y = (bounds.top + bounds.bottom) / 2
-                
+
                 # Check if coordinates are in Web Mercator (absolute values > 180)
                 if abs(center_x) > 180 or abs(center_y) > 180:
                     # Convert from Web Mercator to WGS84
                     from pyproj import Transformer
-                    transformer = Transformer.from_crs("EPSG:3857", "EPSG:4326", always_xy=True)
+
+                    transformer = Transformer.from_crs(
+                        "EPSG:3857", "EPSG:4326", always_xy=True
+                    )
                     center_lon, center_lat = transformer.transform(center_x, center_y)
                 else:
                     # Already in lat/lon
                     center_lon, center_lat = center_x, center_y
 
                 m = leafmap.Map(center=[center_lat, center_lon], zoom=10)
-                
+
                 # Add satellite image as base layer (same as upload method)
                 try:
-                    m.add_raster(aoi_tiff_path, layer_name="Satellite Image", opacity=1.0)
+                    m.add_raster(
+                        aoi_tiff_path, layer_name="Satellite Image", opacity=1.0
+                    )
                 except Exception as e:
-                    st.warning(f"Could not add raster to map: {e}. Using basemap instead.")
+                    st.warning(
+                        f"Could not add raster to map: {e}. Using basemap instead."
+                    )
                     if basemap:
                         m.add_basemap(basemap)
 
@@ -964,28 +1083,33 @@ def main():
                 if gdf is not None and len(gdf) > 0:
                     # Keep GDF in same CRS as raster for proper alignment (like upload method)
                     gdf_display = gdf
-                    
+
                     style = {
-                        "color": "#00BFFF",      # Bright blue
-                        "weight": 4,             # Thicker lines for visibility
-                        "fillOpacity": 0.0,      # No fill, just outline
-                        "opacity": 1.0,          # Fully opaque
-                        "fillColor": "#00BFFF"   # Blue fill color (when hovering)
+                        "color": "#00BFFF",  # Bright blue
+                        "weight": 4,  # Thicker lines for visibility
+                        "fillOpacity": 0.0,  # No fill, just outline
+                        "opacity": 1.0,  # Fully opaque
+                        "fillColor": "#00BFFF",  # Blue fill color (when hovering)
                     }
-                    
+
                     # Create hover fields for tooltip
                     hover_fields = ["id", "area_km2", "area_m2", "perimeter_m"]
-                    hover_aliases = ["Water Body ID", "Area (km²)", "Area (m²)", "Perimeter (m)"]
-                    
+                    hover_aliases = [
+                        "Water Body ID",
+                        "Area (km²)",
+                        "Area (m²)",
+                        "Perimeter (m)",
+                    ]
+
                     m.add_gdf(
-                        gdf_display, 
-                        layer_name="Water Bodies (detected)", 
+                        gdf_display,
+                        layer_name="Water Bodies (detected)",
                         style=style,
                         hover_fields=hover_fields,
                         hover_aliases=hover_aliases,
-                        info_mode="on_hover"
+                        info_mode="on_hover",
                     )
-                    
+
                     # Show summary statistics
                     total_area = gdf["area_km2"].sum()
                     largest = gdf["area_km2"].max()
@@ -1006,15 +1130,22 @@ def main():
 
             if gdf is not None and len(gdf) > 0:
                 st.write(f"Detected {len(gdf)} water polygons.")
-                
+
                 # Show statistics table
                 with st.expander("Water Bodies Statistics Table", expanded=False):
                     st.write("**All detected water bodies (sorted by area):**")
                     # Display table with selected columns
-                    display_df = gdf[["id", "area_km2", "area_m2", "perimeter_m"]].copy()
-                    display_df.columns = ["ID", "Area (km²)", "Area (m²)", "Perimeter (m)"]
+                    display_df = gdf[
+                        ["id", "area_km2", "area_m2", "perimeter_m"]
+                    ].copy()
+                    display_df.columns = [
+                        "ID",
+                        "Area (km²)",
+                        "Area (m²)",
+                        "Perimeter (m)",
+                    ]
                     st.dataframe(display_df, width="stretch", hide_index=True)
-                    
+
                     # Summary statistics
                     col1, col2, col3, col4 = st.columns(4)
                     with col1:
@@ -1026,7 +1157,9 @@ def main():
                     with col4:
                         st.metric("Smallest", f"{gdf['area_km2'].min():.4f} km²")
             else:
-                st.write("Vector polygons not generated yet. Use Export to generate them.")
+                st.write(
+                    "Vector polygons not generated yet. Use Export to generate them."
+                )
 
             # Compute total water area (approximate, in km²)
             total_area_km2 = None
@@ -1055,15 +1188,23 @@ def main():
                         with st.spinner("Creating shapefile..."):
                             # Convert to WGS84 for proper export
                             gdf_export = gdf.copy()
-                            original_crs = gdf_export.crs.to_epsg() if gdf_export.crs else None
+                            original_crs = (
+                                gdf_export.crs.to_epsg() if gdf_export.crs else None
+                            )
                             if gdf_export.crs and gdf_export.crs.to_epsg() != 4326:
                                 gdf_export = gdf_export.to_crs(epsg=4326)
-                                st.info(f" Converted from EPSG:{original_crs} to WGS84 (EPSG:4326) for export")
+                                st.info(
+                                    f" Converted from EPSG:{original_crs} to WGS84 (EPSG:4326) for export"
+                                )
                             with tempfile.TemporaryDirectory() as tmpdir:
-                                shp_path, zip_path = export_shapefile_zip(gdf_export, tmpdir, base_name="water_mask_aoi")
+                                shp_path, zip_path = export_shapefile_zip(
+                                    gdf_export, tmpdir, base_name="water_mask_aoi"
+                                )
                                 with open(zip_path, "rb") as f:
                                     shp_bytes = f.read()
-                        st.success("Shapefile exported in WGS84 (EPSG:4326) coordinate system")
+                        st.success(
+                            "Shapefile exported in WGS84 (EPSG:4326) coordinate system"
+                        )
                         st.download_button(
                             label="📥 Download Shapefile ZIP",
                             data=shp_bytes,
@@ -1081,16 +1222,22 @@ def main():
                         with st.spinner("Creating KML..."):
                             # Convert to WGS84 for KML (required by KML spec)
                             gdf_export = gdf.copy()
-                            original_crs = gdf_export.crs.to_epsg() if gdf_export.crs else None
+                            original_crs = (
+                                gdf_export.crs.to_epsg() if gdf_export.crs else None
+                            )
                             if gdf_export.crs and gdf_export.crs.to_epsg() != 4326:
                                 gdf_export = gdf_export.to_crs(epsg=4326)
-                                st.info(f"Converted from EPSG:{original_crs} to WGS84 (EPSG:4326) for KML export")
+                                st.info(
+                                    f"Converted from EPSG:{original_crs} to WGS84 (EPSG:4326) for KML export"
+                                )
                             with tempfile.TemporaryDirectory() as tmpdir:
                                 kml_path = os.path.join(tmpdir, "water_mask_aoi.kml")
                                 gdf_export.to_file(kml_path, driver="KML")
                                 with open(kml_path, "rb") as f:
                                     kml_bytes = f.read()
-                        st.success("KML exported in WGS84 (EPSG:4326) - compatible with Google Earth")
+                        st.success(
+                            "KML exported in WGS84 (EPSG:4326) - compatible with Google Earth"
+                        )
                         st.download_button(
                             label="📥 Download KML",
                             data=kml_bytes,
@@ -1124,7 +1271,7 @@ def main():
 
     # Load raster (for model and bounds)
     image, profile, transform, crs, bounds = read_geotiff(tiff_path)
-    
+
     # Display image information
     with st.expander("Image Information", expanded=False):
         col1, col2 = st.columns(2)
@@ -1134,23 +1281,29 @@ def main():
             st.write(f"**Data type:** {image.dtype}")
         with col2:
             st.write(f"**CRS:** {crs}")
-            area_km2 = ((bounds.right - bounds.left) * (bounds.top - bounds.bottom)) / 1e6
+            area_km2 = (
+                (bounds.right - bounds.left) * (bounds.top - bounds.bottom)
+            ) / 1e6
             if crs and not crs.is_geographic:
                 # For projected CRS, convert to km²
-                area_km2 = ((bounds.right - bounds.left) * (bounds.top - bounds.bottom)) / 1e6
+                area_km2 = (
+                    (bounds.right - bounds.left) * (bounds.top - bounds.bottom)
+                ) / 1e6
             st.write(f"**Approx. area:** {area_km2:.2f} km²")
             st.write(f"**Bounds:** {bounds}")
-    
+
     # Preview uploaded image - create RGB visualization
     st.subheader("Uploaded Image Preview")
-    
+
     if image.shape[0] >= 3:
         # Create RGB preview
         try:
             # For Sentinel-2/6-band: bands 3,2,1 = R,G,B
-            rgb_bands = [min(2, image.shape[0]-1), min(1, image.shape[0]-1), 0]
-            rgb = np.stack([image[rgb_bands[0]], image[rgb_bands[1]], image[rgb_bands[2]]], axis=-1)
-            
+            rgb_bands = [min(2, image.shape[0] - 1), min(1, image.shape[0] - 1), 0]
+            rgb = np.stack(
+                [image[rgb_bands[0]], image[rgb_bands[1]], image[rgb_bands[2]]], axis=-1
+            )
+
             # Normalize to 0-255
             for i in range(3):
                 band = rgb[:, :, i]
@@ -1158,8 +1311,12 @@ def main():
                 if len(valid) > 0:
                     p2, p98 = np.percentile(valid, (2, 98))
                     rgb[:, :, i] = np.clip((band - p2) / (p98 - p2) * 255, 0, 255)
-            
-            st.image(rgb.astype(np.uint8), caption="RGB Preview (bands shown may vary by sensor)", width="stretch")
+
+            st.image(
+                rgb.astype(np.uint8),
+                caption="RGB Preview (bands shown may vary by sensor)",
+                width="stretch",
+            )
         except Exception as e:
             st.warning(f"Could not create RGB preview: {e}")
     else:
@@ -1170,7 +1327,11 @@ def main():
             if len(valid) > 0:
                 p2, p98 = np.percentile(valid, (2, 98))
                 band_norm = np.clip((band - p2) / (p98 - p2) * 255, 0, 255)
-                st.image(band_norm.astype(np.uint8), caption="Grayscale Preview", width="stretch")
+                st.image(
+                    band_norm.astype(np.uint8),
+                    caption="Grayscale Preview",
+                    width="stretch",
+                )
         except Exception as e:
             st.warning(f"Could not create preview: {e}")
 
@@ -1183,13 +1344,15 @@ def main():
         with st.spinner("Loading model and running inference..."):
             model = get_model(model_path, device=device)
             mask, prob = predict_large_image(model, image, device=device)
-            
+
             # Convert mask to polygons for visualization and export
             with st.spinner("Converting mask to polygons..."):
                 gdf = mask_to_vector(mask, transform, crs)
 
             # Save mask GeoTIFF to temp file
-            with tempfile.NamedTemporaryFile(suffix="_mask.tif", delete=False) as tmp_mask:
+            with tempfile.NamedTemporaryFile(
+                suffix="_mask.tif", delete=False
+            ) as tmp_mask:
                 mask_tif_path = tmp_mask.name
             save_mask_geotiff(mask, profile, mask_tif_path)
 
@@ -1215,7 +1378,7 @@ def main():
         bounds = data["bounds"]
         transform = data["transform"]
         crs = data["crs"]
-        
+
         # Interactive map with satellite imagery and water outline
         st.subheader("🗺️ Interactive Map with Water Detection")
         st.info("📍 Blue outlines show detected water bodies on the satellite image")
@@ -1224,7 +1387,7 @@ def main():
             center_x = (bounds.left + bounds.right) / 2
 
             m = leafmap.Map(center=[center_y, center_x], zoom=12)
-            
+
             # Add uploaded satellite image as base layer
             try:
                 m.add_raster(tiff_path, layer_name="Satellite Image", opacity=1.0)
@@ -1236,26 +1399,31 @@ def main():
             # Overlay water detection outlines in bright blue with hover tooltips
             if gdf is not None and len(gdf) > 0:
                 style = {
-                    "color": "#00BFFF",      # Bright blue
-                    "weight": 4,             # Thicker lines for visibility  
-                    "fillOpacity": 0.0,      # No fill, just outline
-                    "opacity": 1.0,          # Fully opaque
-                    "fillColor": "#00BFFF"   # Blue fill color (when hovering)
+                    "color": "#00BFFF",  # Bright blue
+                    "weight": 4,  # Thicker lines for visibility
+                    "fillOpacity": 0.0,  # No fill, just outline
+                    "opacity": 1.0,  # Fully opaque
+                    "fillColor": "#00BFFF",  # Blue fill color (when hovering)
                 }
-                
+
                 # Create hover fields for tooltip
                 hover_fields = ["id", "area_km2", "area_m2", "perimeter_m"]
-                hover_aliases = ["Water Body ID", "Area (km²)", "Area (m²)", "Perimeter (m)"]
-                
+                hover_aliases = [
+                    "Water Body ID",
+                    "Area (km²)",
+                    "Area (m²)",
+                    "Perimeter (m)",
+                ]
+
                 m.add_gdf(
-                    gdf, 
-                    layer_name="Water Bodies (detected)", 
+                    gdf,
+                    layer_name="Water Bodies (detected)",
                     style=style,
                     hover_fields=hover_fields,
                     hover_aliases=hover_aliases,
-                    info_mode="on_hover"
+                    info_mode="on_hover",
                 )
-                
+
                 # Show summary statistics
                 total_area = gdf["area_km2"].sum()
                 largest = gdf["area_km2"].max()
@@ -1276,7 +1444,7 @@ def main():
 
         if gdf is not None and len(gdf) > 0:
             st.write(f"Detected {len(gdf)} water polygons.")
-            
+
             # Show statistics table
             with st.expander("Water Bodies Statistics Table", expanded=False):
                 st.write("**All detected water bodies (sorted by area):**")
@@ -1284,7 +1452,7 @@ def main():
                 display_df = gdf[["id", "area_km2", "area_m2", "perimeter_m"]].copy()
                 display_df.columns = ["ID", "Area (km²)", "Area (m²)", "Perimeter (m)"]
                 st.dataframe(display_df, width="stretch", hide_index=True)
-                
+
                 # Summary statistics
                 col1, col2, col3, col4 = st.columns(4)
                 with col1:
@@ -1328,7 +1496,9 @@ def main():
                         if gdf_export.crs and gdf_export.crs.to_epsg() != 4326:
                             gdf_export = gdf_export.to_crs(epsg=4326)
                         with tempfile.TemporaryDirectory() as tmpdir:
-                            shp_path, zip_path = export_shapefile_zip(gdf_export, tmpdir, base_name="water_mask")
+                            shp_path, zip_path = export_shapefile_zip(
+                                gdf_export, tmpdir, base_name="water_mask"
+                            )
                             with open(zip_path, "rb") as f:
                                 shp_bytes = f.read()
                     st.download_button(
