@@ -14,7 +14,6 @@ import ee
 import geemap
 import json
 
-
 # -----------------------------
 # MODEL LOADING
 # -----------------------------
